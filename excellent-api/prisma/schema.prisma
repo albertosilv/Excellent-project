@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") 
+}
+
+model User {
+  id            String    @id @default(uuid())
+  corporateName String    @map("corporate_name")  // Razão Social
+  cnpj          String    @unique
+  email         String    @unique
+  password      String 
+  role          UserRole  @default(USER)  
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  
+  orders        Order[]
+  
+  @@map("users")  
+}
+
+enum UserRole {
+  ADMIN  
+  USER  
+}
+
+model Product {
+  id          String        @id @default(uuid())
+  description String
+  salePrice   Decimal       @map("sale_price")
+  stock       Int
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  
+  images      ProductImage[]
+  orderItems  OrderItem[]
+  
+  @@map("products")
+}
+
+model ProductImage {
+  id          String    @id @default(uuid())
+  url         String
+  productId   String    @map("product_id")
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  @@map("product_images")
+}
+
+enum OrderStatus {
+  OPEN        // ABERTO
+  CONFIRMED   // CONFIRMADO
+  CANCELLED   // CANCELADO
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id") 
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status      OrderStatus @default(OPEN)
+  totalAmount Decimal     @map("total_amount") @default(0)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  
+  items       OrderItem[]
+  
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String    @id @default(uuid())
+  orderId     String    @map("order_id")
+  productId   String    @map("product_id")
+  quantity    Int
+  unitPrice   Decimal   @map("unit_price")
+  totalPrice  Decimal   @map("total_price")
+  
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id])
+  
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  @@unique([orderId, productId])
+  @@map("order_items")
+}

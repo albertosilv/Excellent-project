@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: excellent-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: excellent_db
+    ports:
+      - "5433:5432" 
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./excellent-api
+      dockerfile: Dockerfile.backend
+    container_name: app-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+      - "9229:9229"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-appdb}
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DEBUG: ${DEBUG:-nestjs*}
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+      - backend_logs:/usr/src/app/logs
+    networks:
+      - app-network
+    command: >
+      sh -c "
+        # Instala dependências se node_modules não existir
+        if [ ! -d \"node_modules\" ]; then
+          echo 'Instalando dependências...' &&
+          npm ci
+        fi &&
+        
+        # Gera cliente Prisma
+        echo 'Gerando cliente Prisma...' &&
+        npx prisma generate &&
+        
+        # Executa migrações
+        echo 'Executando migrações...' &&
+        npx prisma migrate deploy &&
+        
+        # Executa seed se existir
+        if [ -f \"prisma/seed.ts\" ] || [ -f \"prisma/seed.js\" ]; then
+          echo 'Executando seed...' &&
+          npx prisma db seed
+        else
+          echo 'Arquivo de seed não encontrado, pulando...'
+        fi &&
+        
+        # Inicia em modo desenvolvimento
+        echo 'Iniciando servidor...' &&
+        npm run start:dev
+      "
+
+  frontend:
+    build:
+      context: ./excellent-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: app-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3001:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:3000/api
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+    volumes:
+      - ./frontend:/usr/src/app
+      - /usr/src/app/node_modules
+    networks:
+      - app-network
+    command: npm run dev
+
+  prisma-studio:
+    build:
+      context: ./excellent-api
+      dockerfile: Dockerfile.backend
+    container_name: app-prisma-studio
+    depends_on:
+      - postgres
+    ports:
+      - "5555:5555"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/excellent_db?schema=public
+    networks:
+      - app-network
+    command: npx prisma studio --host 0.0.0.0
+
+volumes:
+  postgres_data:
+  backend_logs:
+
+networks:
+  app-network:
+    driver: bridge
